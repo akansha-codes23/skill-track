@@ -30,18 +30,13 @@ interface ProfileFormData {
   name: string;
   email: string;
   phone: string;
-  location: string;
+  state: string;
+  district: string;
   education: string;
   graduationYear: number;
   experience: string;
   certifications: string[];
 }
-
-const levels: SkillLevel[] = [
-  'Beginner',
-  'Intermediate',
-  'Advanced',
-];
 
 export default function StudentProfile() {
   const { user, updateUser } = useAuth();
@@ -55,7 +50,8 @@ export default function StudentProfile() {
     name: '',
     email: '',
     phone: '',
-    location: '',
+    state: '',
+    district: '',
     education: '',
     graduationYear: 2024,
     experience: '',
@@ -74,7 +70,7 @@ export default function StudentProfile() {
       try {
         setLoading(true);
 
-        // Load profile information
+        // Load profile information from Supabase
         const { data, error } = await supabase
           .from('users')
           .select(
@@ -92,9 +88,8 @@ export default function StudentProfile() {
             name: data.name || '',
             email: data.email || '',
             phone: data.phone || '',
-            location: data.state
-              ? `${data.district || ''}, ${data.state}`
-              : '',
+            state: data.state || '',
+            district: data.district || '',
             education: data.education || '',
             graduationYear: data.graduation_year || 2024,
             experience: data.experience || '',
@@ -104,7 +99,7 @@ export default function StudentProfile() {
           });
         }
 
-        // Load skills from Supabase
+        // Load student's skills from Supabase
         const { data: skillsData, error: skillsError } = await supabase
           .from('user_skills')
           .select('skill_id, skill_name, level')
@@ -115,26 +110,22 @@ export default function StudentProfile() {
           throw skillsError;
         }
 
-        const skills: UserSkill[] = (skillsData || []).map(
-          (skill) => ({
-            skillId: skill.skill_id,
-            skillName: skill.skill_name,
-            level: skill.level as SkillLevel,
-          })
-        );
+        const skills: UserSkill[] = (skillsData || []).map((skill) => ({
+          skillId: String(skill.skill_id),
+          skillName: String(skill.skill_name),
+          level: skill.level as SkillLevel,
+        }));
 
         setUserSkills(skills);
       } catch (error) {
         console.error('Error loading profile:', error);
 
-        // Keep basic information from logged-in user if database load fails
         setFormData((current) => ({
           ...current,
           name: user.name || '',
           email: user.email || '',
-          location: user.state
-            ? `${user.district || ''}, ${user.state}`
-            : '',
+          state: user.state || '',
+          district: user.district || '',
         }));
       } finally {
         setLoading(false);
@@ -150,51 +141,56 @@ export default function StudentProfile() {
     try {
       setSaving(true);
 
-      const { data, error } = await supabase
+      const updatedProfile = {
+        name: formData.name.trim(),
+        email: formData.email.trim().toLowerCase(),
+        phone: formData.phone.trim(),
+        state: formData.state.trim(),
+        district: formData.district.trim(),
+        education: formData.education.trim(),
+        graduation_year: formData.graduationYear,
+        experience: formData.experience.trim(),
+        certifications: formData.certifications,
+      };
+
+      const { error } = await supabase
         .from('users')
-        .update({
-          name: formData.name.trim(),
-          email: formData.email.trim().toLowerCase(),
-          phone: formData.phone.trim(),
-          education: formData.education.trim(),
-          graduation_year: formData.graduationYear,
-          experience: formData.experience.trim(),
-          certifications: formData.certifications,
-        })
-        .eq('id', user.id)
-        .select(
-          'name, email, phone, state, district, education, graduation_year, experience, certifications'
-        )
-        .single();
+        .update(updatedProfile)
+        .eq('id', user.id);
 
       if (error) {
         throw error;
       }
 
-      setFormData({
-        name: data.name || '',
-        email: data.email || '',
-        phone: data.phone || '',
-        location: data.state
-          ? `${data.district || ''}, ${data.state}`
-          : '',
-        education: data.education || '',
-        graduationYear: data.graduation_year || 2024,
-        experience: data.experience || '',
-        certifications: Array.isArray(data.certifications)
-          ? data.certifications
-          : [],
+      // Update local login information
+      updateUser({
+        name: updatedProfile.name,
+        email: updatedProfile.email,
+        state: updatedProfile.state,
+        district: updatedProfile.district,
       });
 
-      updateUser({
-        name: data.name,
-        email: data.email,
-      });
+      // Keep the UI in sync
+      setFormData((current) => ({
+        ...current,
+        ...{
+          name: updatedProfile.name,
+          email: updatedProfile.email,
+          phone: updatedProfile.phone,
+          state: updatedProfile.state,
+          district: updatedProfile.district,
+          education: updatedProfile.education,
+          graduationYear: updatedProfile.graduation_year,
+          experience: updatedProfile.experience,
+          certifications: updatedProfile.certifications,
+        },
+      }));
 
       setEditing(false);
+      alert('Profile updated successfully!');
     } catch (error) {
       console.error('Error saving profile:', error);
-      alert('Unable to save the changes.');
+      alert('Unable to save the changes. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -242,12 +238,6 @@ export default function StudentProfile() {
       icon: Phone,
       label: 'Phone',
       key: 'phone',
-      type: 'text',
-    },
-    {
-      icon: MapPin,
-      label: 'Location',
-      key: 'location',
       type: 'text',
     },
     {
@@ -359,6 +349,7 @@ export default function StudentProfile() {
           </h3>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
             {profileFields.map((field) => {
               const Icon = field.icon;
 
@@ -374,7 +365,7 @@ export default function StudentProfile() {
                     {field.label}
                   </label>
 
-                  {editing && field.key !== 'location' ? (
+                  {editing ? (
                     <input
                       type={field.type}
                       value={value as string | number}
@@ -397,6 +388,51 @@ export default function StudentProfile() {
                 </div>
               );
             })}
+
+            {/* Location */}
+            <div>
+              <label className="text-sm font-medium text-gray-500 flex items-center gap-1.5 mb-1">
+                <MapPin className="w-3.5 h-3.5" />
+                Location
+              </label>
+
+              {editing ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    value={formData.district}
+                    onChange={(e) =>
+                      setFormData((current) => ({
+                        ...current,
+                        district: e.target.value,
+                      }))
+                    }
+                    placeholder="District"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-sm"
+                  />
+
+                  <input
+                    type="text"
+                    value={formData.state}
+                    onChange={(e) =>
+                      setFormData((current) => ({
+                        ...current,
+                        state: e.target.value,
+                      }))
+                    }
+                    placeholder="State"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none text-sm"
+                  />
+                </div>
+              ) : (
+                <p className="text-sm text-gray-900 py-2">
+                  {formData.district && formData.state
+                    ? `${formData.district}, ${formData.state}`
+                    : formData.district || formData.state || ''}
+                </p>
+              )}
+            </div>
+
           </div>
         </div>
 
@@ -539,6 +575,7 @@ export default function StudentProfile() {
             </div>
           )}
         </div>
+
       </div>
     </DashboardLayout>
   );
