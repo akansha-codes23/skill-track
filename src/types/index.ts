@@ -180,6 +180,12 @@ export interface User {
   skillGapPercentage: number;
   trainingProgress: number;
   employmentStatus: EmploymentStatus;
-  state?: string;
+    state?: string;
   district?: string;
+  phone?: string;
+  education?: string;
+  graduationYear?: number;
+  experience?: string;
+  certifications?: string[];
+
 }

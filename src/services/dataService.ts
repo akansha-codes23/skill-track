@@ -324,56 +324,57 @@ export const instituteService = {
 
 // ---------- Auth ----------
 export const authService = {
-  async login(
-    email: string,
-    password: string
-  ): Promise<User | null> {
+  async login(email: string, password: string): Promise<User | null> {
     const cleanEmail = email.trim().toLowerCase();
 
-    // First: use the working local/demo login
-    let user = allUsers.find(
+    // First try Supabase Auth
+    const { data: authData, error: authError } =
+      await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password,
+      });
+
+    // If Supabase login succeeds, load the matching profile
+    if (!authError && authData.user) {
+      const { data: profile, error: profileError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('auth_user_id', authData.user.id)
+        .maybeSingle();
+
+      if (!profileError && profile) {
+        return {
+          id: profile.id,
+          name: profile.name,
+          email: profile.email,
+          password: profile.password || password,
+          role: profile.role,
+          profileCompletion: profile.profile_completion ?? 0,
+          skillScore: profile.skill_score ?? 0,
+          skillGapPercentage: profile.skill_gap_percentage ?? 0,
+          trainingProgress: profile.training_progress ?? 0,
+          employmentStatus: profile.employment_status ?? 'Unemployed',
+          domainId: profile.domain_id,
+          jobRoleId: profile.job_role_id,
+          state: profile.state,
+          district: profile.district,
+          phone: profile.phone,
+          education: profile.education,
+          graduationYear: profile.graduation_year,
+          experience: profile.experience,
+          certifications: profile.certifications,
+        };
+      }
+    }
+
+    // Fallback for existing demo/mock users
+    const localUser = allUsers.find(
       (u) =>
         u.email.toLowerCase() === cleanEmail &&
         u.password === password
     );
 
-    // Current Student demo account
-    if (
-      !user &&
-      cleanEmail === 'skilltrack.demo.student@gmail.com' &&
-      password === 'DemoStudent123!'
-    ) {
-      const student = users.find((u) => u.id === 'u1');
-
-      if (student) {
-        user = {
-          ...student,
-          email: cleanEmail,
-        };
-      }
-    }
-
-    if (!user) {
-      return null;
-    }
-
-    /*
-      Also create a Supabase Auth session.
-
-      This does NOT control whether login succeeds.
-      The local login above remains the main login system.
-    */
-    try {
-      await supabase.auth.signInWithPassword({
-        email: cleanEmail,
-        password,
-      });
-    } catch {
-      // Ignore Supabase auth failure.
-      // Local login should still work.
-    }
-
-    return user;
+    return localUser || null;
   },
 
   async register(
@@ -384,6 +385,7 @@ export const authService = {
   ): Promise<User | null> {
     const cleanEmail = email.trim().toLowerCase();
 
+    // Check local users first
     const existingUser = allUsers.find(
       (u) => u.email.toLowerCase() === cleanEmail
     );
@@ -402,8 +404,38 @@ export const authService = {
       throw error || new Error('Unable to create account.');
     }
 
+    const newUserId = `u${Date.now()}`;
+
+    // Create the user profile in the database
+    const { error: profileError } = await supabase
+      .from('users')
+      .insert([
+        {
+          id: newUserId,
+          name,
+          email: cleanEmail,
+          password,
+          role,
+          profile_completion: 20,
+          skill_score: 0,
+          skill_gap_percentage: 0,
+          training_progress: 0,
+          employment_status: 'Unemployed',
+          auth_user_id: data.user.id,
+        },
+      ]);
+
+    if (profileError) {
+      // Remove the active session if profile creation fails
+      await supabase.auth.signOut();
+
+      throw new Error(
+        `Account created, but profile creation failed: ${profileError.message}`
+      );
+    }
+
     const newUser: User = {
-      id: `u${Date.now()}`,
+      id: newUserId,
       name,
       email: cleanEmail,
       password,
@@ -415,6 +447,7 @@ export const authService = {
       employmentStatus: 'Unemployed',
     };
 
+    // Keep local arrays updated for the existing application code
     allUsers.push(newUser);
 
     if (role === 'student') {
@@ -426,6 +459,10 @@ export const authService = {
     }
 
     return newUser;
+  },
+
+  async logout(): Promise<void> {
+    await supabase.auth.signOut();
   },
 };
 
